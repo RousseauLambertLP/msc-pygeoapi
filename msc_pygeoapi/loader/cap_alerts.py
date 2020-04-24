@@ -178,17 +178,19 @@ class CapAlertsRealtimeLoader(BaseLoader):
         :returns: True/False
         """
 
-        data = self.weather_warning2geojson(filepath)
+        click.echo('done something for the alerts!!!!!')
 
-        try:
-            r = self.ES.index(index=INDEX_NAME,
-                              id=data['properties']['identifier'],
-                              body=data)
-            LOGGER.debug('Result: {}'.format(r))
-            return True
-        except Exception as err:
-            LOGGER.warning('Error indexing: {}'.format(err))
-            return False
+        #data = self.weather_warning2geojson(filepath)
+
+        #try:
+        #    r = self.ES.index(index=INDEX_NAME,
+        #                      id=data['properties']['identifier'],
+        #                      body=data)
+        #    LOGGER.debug('Result: {}'.format(r))
+        #    return True
+        #except Exception as err:
+        #    LOGGER.warning('Error indexing: {}'.format(err))
+        #    return False
 
     def _get_date_format(date):
         """
@@ -406,7 +408,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
 
 @click.group()
 def cap_alerts():
-    """Manages current conditions index"""
+    """Manages cap alerts index"""
     pass
 
 

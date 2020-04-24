@@ -53,6 +53,10 @@ PLUGINS = {
         'forecast_polygon': {
             'filename_pattern': 'meteocode/geodata/',
             'handler': 'msc_pygeoapi.loader.forecast_polygons.ForecastPolygonsLoader'  # noqa
+        },
+        'capalerts_realtime': {
+            'filename_pattern': 'alerts/cap',
+            'handler': 'msc_pygeoapi.loader.cap_alerts.CapAlertsRealtimeLoader'
         }
     }
 }
