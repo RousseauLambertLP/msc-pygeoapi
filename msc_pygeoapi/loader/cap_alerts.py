@@ -53,7 +53,7 @@ ALERTS_LEVELS = ['advisory', 'statement', 'watch', 'warning']
 # Index settings
 INDEX_NAME = 'cap_alerts'
 
-INDEX_SETTINGS = {
+SETTINGS = {
     'settings': {
         'number_of_shards': 1,
         'number_of_replicas': 0
@@ -178,9 +178,30 @@ class CapAlertsRealtimeLoader(BaseLoader):
         :returns: True/False
         """
 
-        click.echo('done something for the alerts!!!!!')
+        data = self.weather_warning2geojson(filepath)
 
-        #data = self.weather_warning2geojson(filepath)
+        try:
+            bulk_data = []
+            for doc in data:
+                op_dict = {
+                    'index': {
+                        '_index': INDEX_NAME,
+                        '_type': '_doc'
+                    }
+                }
+                op_dict['index']['_id'] = doc['properties']['identifier']
+                bulk_data.append(op_dict)
+                bulk_data.append(doc)
+            r = self.ES.bulk(index=INDEX_NAME, body=bulk_data)
+
+            LOGGER.debug('Result: {}'.format(r))
+            return True
+
+        except Exception as err:
+            LOGGER.exception('Error bulk indexing: {}'.format(err))
+            return False
+
+        #print(data)
 
         #try:
         #    r = self.ES.index(index=INDEX_NAME,
@@ -192,7 +213,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
         #    LOGGER.warning('Error indexing: {}'.format(err))
         #    return False
 
-    def _get_date_format(date):
+    def _get_date_format(self, date):
         """
         Convenience function to parse CAP dates
 
@@ -202,9 +223,9 @@ class CapAlertsRealtimeLoader(BaseLoader):
         """
         for char in ["T", "-", ":"]:
             if char in date:
-                date = date.replace(char, None)
+                date = date.replace(char, '')
         date = date[:14]
-        date = datetime.datetime.strptime(date, "%Y%m%d%H%M%S")
+        date = datetime.strptime(date, "%Y%m%d%H%M%S")
 
         return date
 
@@ -226,7 +247,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
             return val.text
         return None
 
-    def weather_warning2geojson(filepath):
+    def weather_warning2geojson(self, filepath):
         """
         Create GeoJSON that will be use to display weather alerts
 
@@ -236,12 +257,12 @@ class CapAlertsRealtimeLoader(BaseLoader):
         """
 
         # we must define the variable that we'll need
-        now = datetime.datetime.utcnow()
+        now = datetime.utcnow()
 
         french_alert = {}
         english_alert = {}
         english_alert_remove = []
-        lias_id = []
+        list_id = []
 
         timeformat = '%Y-%m-%dT%H:%M:%SZ'
         # we want to run a loop on every cap-xml in filepath and add them
@@ -262,37 +283,37 @@ class CapAlertsRealtimeLoader(BaseLoader):
 
         base_xml = '{urn:oasis:names:tc:emergency:cap:1.2}'
 
-        identifier = _get_element(root,
+        identifier = self._get_element(root,
                                   '{}identifier'.format(base_xml))
-        references = _get_element(root,
+        references = self._get_element(root,
                                   '{}references'.format(base_xml))
 
         lastref = references.split(',')[-1]
 
         for grandchild in root.iter('{}info'.format(base_xml)):
-            expires = _get_date_format(_get_element(grandchild,
+            expires = self._get_date_format(self._get_element(grandchild,
                                                     '{}expires'.format(base_xml)))\
                       .strftime(timeformat)
     
-            status_alert = _get_element(grandchild,
+            status_alert = self._get_element(grandchild,
                                         '{}parameter[last()-4]/'
                                         '{}value'.format(base_xml, base_xml))
     
-            if _get_date_format(expires) > now or identifier not in list_id:
+            if self._get_date_format(expires) > now or identifier not in list_id:
                 list_id.append(lastref)
-                language = _get_element(grandchild,
+                language = self._get_element(grandchild,
                                         '{}language'.format(base_xml))
                 if language == 'fr-CA':
-                    headline = _get_element(grandchild,
+                    headline = self._get_element(grandchild,
                                             '{}headline'.format(base_xml))
-                    descript = _get_element(grandchild,
+                    descript = self._get_element(grandchild,
                                             '{}description'.format(base_xml))\
                         .replace("\n", " ").strip()
     
                     for i in grandchild.iter('{}area'.format(base_xml)):
-                        tag = _get_element(i, '{}polygon'.format(base_xml))
-                        name = _get_element(i, '{}areaDesc'.format(base_xml))
-                        id_warning = re.sub('[-, .]', None, tag)[:25]
+                        tag = self._get_element(i, '{}polygon'.format(base_xml))
+                        name = self._get_element(i, '{}areaDesc'.format(base_xml))
+                        id_warning = re.sub('[-, .]', '', tag)[:25]
     
                         if id_warning not in french_alert:
                             french_alert[id_warning] = (id_warning,
@@ -300,18 +321,18 @@ class CapAlertsRealtimeLoader(BaseLoader):
                                                         headline,
                                                         descript)
                 else:
-                    headline = _get_element(grandchild,
+                    headline = self._get_element(grandchild,
                                             '{}headline'.format(base_xml))
-                    descript = _get_element(grandchild,
+                    descript = self._get_element(grandchild,
                                             '{}description'.format(base_xml))\
                         .replace("\n", " ").strip()
     
-                    effective = _get_date_format(_get_element
+                    effective = self._get_date_format(self._get_element
                                                  (grandchild,
                                                   '{}effective'.format(base_xml)))\
                         .strftime(timeformat)
     
-                    warning = _get_element(grandchild,
+                    warning = self._get_element(grandchild,
                                            '{}parameter[1]/'
                                            '{}value'.format(base_xml,
                                                             base_xml))
@@ -319,13 +340,13 @@ class CapAlertsRealtimeLoader(BaseLoader):
                     # There can be many <area> cobvered by one
                     #  <info> so we have to loop through the info
                     for i in grandchild.iter('{}area'.format(base_xml)):
-                        tag = _get_element(i, '{}polygon'.format(base_xml))
-                        name = _get_element(i, '{}areaDesc'.format(base_xml))
+                        tag = self._get_element(i, '{}polygon'.format(base_xml))
+                        name = self._get_element(i, '{}areaDesc'.format(base_xml))
     
                         split_tag = re.split(' |,', tag)
                         # We want to create a unique id for an area and one warning
                         # We use the warning ID + a unique code for the area
-                        id_warning = re.sub('[-, .]', None, tag)[:25]
+                        id_warning = re.sub('[-, .]', '', tag)[:25]
                         # We start by parsing the most recent file
                         # so we can say that if an unique ID is already in
                         # the dictionary don't add the warning from the oldest file
@@ -346,7 +367,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
 
         LOGGER.info('Done processing')
         for j in english_alert:
-            if _get_date_format(english_alert[j][4]) < now:
+            if self._get_date_format(english_alert[j][4]) < now:
                 english_alert_remove.append(j)
                 # We can't remove a element of a dictionary while looping in it
                 # So we remove the warning in another step
