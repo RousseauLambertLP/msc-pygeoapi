@@ -154,6 +154,14 @@ SETTINGS = {
                             }
                         }
                     },
+                    'references': {
+                        'type': 'text',
+                        'fields': {
+                            'raw': {
+                                'type': 'keyword'
+                            }
+                        }
+                    }, 
                     'url': {
                         'type': 'text',
                         'fields': {
@@ -207,7 +215,6 @@ class CapAlertsRealtimeLoader(BaseLoader):
                 bulk_data.append(op_dict)
                 bulk_data.append(doc)
             r = self.ES.bulk(index=INDEX_NAME, body=bulk_data)
-            print(r)
 
             LOGGER.debug('Result: {}'.format(r))
             return True
@@ -277,7 +284,6 @@ class CapAlertsRealtimeLoader(BaseLoader):
         french_alert = {}
         english_alert = {}
         english_alert_remove = []
-        list_id = []
 
         timeformat = '%Y-%m-%dT%H:%M:%SZ'
         # we want to run a loop on every cap-xml in filepath and add them
@@ -302,9 +308,10 @@ class CapAlertsRealtimeLoader(BaseLoader):
         identifier = self._get_element(root,
                                   '{}identifier'.format(base_xml))
         references = self._get_element(root,
-                                  '{}references'.format(base_xml))
-
-        lastref = references.split(',')[-1]
+                                  '{}references'.format(base_xml)).split(' ')
+        references_arr = []
+        for ref in references:
+            references_arr.append(ref.split(',')[1])
 
         for grandchild in root.iter('{}info'.format(base_xml)):
             expires = self._get_date_format(self._get_element(grandchild,
@@ -315,8 +322,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
                                         '{}parameter[last()-4]/'
                                         '{}value'.format(base_xml, base_xml))
     
-            if self._get_date_format(expires) > now or identifier not in list_id:
-                list_id.append(lastref)
+            if self._get_date_format(expires) > now:
                 language = self._get_element(grandchild,
                                         '{}language'.format(base_xml))
                 if language == 'fr-CA':
@@ -329,7 +335,13 @@ class CapAlertsRealtimeLoader(BaseLoader):
                     for i in grandchild.iter('{}area'.format(base_xml)):
                         tag = self._get_element(i, '{}polygon'.format(base_xml))
                         name = self._get_element(i, '{}areaDesc'.format(base_xml))
-                        id_warning = 'a-{}'.format(re.sub('[-, .]', '', tag)[:25])
+
+                        for j in grandchild.iter('{}geocode'.format(base_xml)):
+                            valueName = self._get_element(j, '{}valueName'.format(base_xml))
+                            if valueName == 'layer:EC-MSC-SMC:1.0:CLC':
+                                geocode = self._get_element(j, '{}value'.format(base_xml))
+
+                        id_warning = '{}_{}'.format(identifier, geocode)
     
                         if id_warning not in french_alert:
                             french_alert[id_warning] = (id_warning,
@@ -359,10 +371,15 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         tag = self._get_element(i, '{}polygon'.format(base_xml))
                         name = self._get_element(i, '{}areaDesc'.format(base_xml))
     
+                        for j in grandchild.iter('{}geocode'.format(base_xml)):
+                            valueName = self._get_element(j, '{}valueName'.format(base_xml))
+                            if valueName == 'layer:EC-MSC-SMC:1.0:CLC':
+                                geocode = self._get_element(j, '{}value'.format(base_xml))
+
                         split_tag = re.split(' |,', tag)
-                        # We want to create a unique id for an area and one warning
-                        # We use the warning ID + a unique code for the area
-                        id_warning = 'a-{}'.format(re.sub('[-, .]', '', tag)[:25])
+
+                        id_warning = '{}_{}'.format(identifier, geocode)
+
                         # We start by parsing the most recent file
                         # so we can say that if an unique ID is already in
                         # the dictionary don't add the warning from the oldest file
@@ -431,6 +448,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         'expires': english_alert[num_poly][4],
                         'alert_type': english_alert[num_poly][5],
                         'status': english_alert[num_poly][6],
+                        'references': references_arr,
                         'url': english_alert[num_poly][9]
                     },
                    'geometry': {
