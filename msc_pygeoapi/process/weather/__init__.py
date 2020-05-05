@@ -30,19 +30,17 @@
 
 import click
 
-from msc_pygeoapi.process.cccs import cccs
-from msc_pygeoapi.process.weather import weather
+from msc_pygeoapi.process.weather.raster_drill_weather import cli as rd
+from msc_pygeoapi.process.weather.generate_vigilance import cli as gv
+
+GEOMET_WEATHER_CONFIG = '/users/dor/afss/lor/ENV/gitProject/geomet2/etc/geomet.yml'
+GEOMET_WEATHER_BASEPATH = '/data/geomet/'
+
 
 @click.group()
-def process():
+def weather():
     pass
 
 
-@click.group()
-def execute():
-    pass
-
-
-process.add_command(execute)
-execute.add_command(cccs)
-execute.add_command(weather)
+weather.add_command(rd)
+weather.add_command(gv)
