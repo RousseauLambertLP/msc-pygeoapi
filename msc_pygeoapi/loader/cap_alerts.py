@@ -1,4 +1,4 @@
-# =================================================================
+# ========================295=========================================
 #
 # Author: Louis-Philippe Rousseau-Lambert
 #         <Louis-Philippe.RousseauLambert2@canada.ca>
@@ -38,7 +38,8 @@ import re
 import sys
 
 from msc_pygeoapi.env import (MSC_PYGEOAPI_ES_TIMEOUT, MSC_PYGEOAPI_ES_URL,
-                              MSC_PYGEOAPI_ES_AUTH, MSC_PYGEOAPI_BASEPATH)
+                              MSC_PYGEOAPI_ES_AUTH, MSC_PYGEOAPI_BASEPATH,
+                              GEOMET_WEATHER_BASEPATH)
 from msc_pygeoapi.loader.base import BaseLoader
 from msc_pygeoapi.util import click_abort_if_false, get_es
 
@@ -66,7 +67,12 @@ SETTINGS = {
             'properties': {
                 'properties': {
                     'identifier': {
-                        'type': 'integer',
+                        'type': 'text',
+                        'fields': {
+                            'raw': {
+                                'type': 'keyword'
+                            }
+                        }
                     },
                     'area': {
                         'type': 'text',
@@ -75,6 +81,14 @@ SETTINGS = {
                                 'type': 'keyword'
                             }
                         }
+                    },
+                    'reference': {
+                        'type': 'text',
+                        'fields': {
+                            'raw': {
+                                'type': 'keyword'
+                            }
+                       }
                     },
                     'zone': {
                         'type': 'text',
@@ -118,11 +132,11 @@ SETTINGS = {
                     },
                     'effective': {
                         'type': 'date',
-                        'format': "YYYY-MM-DD'T'HH:mm:ssZ"
+                        'format': "YYYY-MM-DD'T'HH:mm:ss'Z'"
                     },
                     'expires': {
                         'type': 'date',
-                        'format': "YYYY-MM-DD'T'HH:mm:ssZ"
+                        'format': "YYYY-MM-DD'T'HH:mm:ss'Z'"
                     },
                     'alert_type': {
                         'type': 'text',
@@ -193,12 +207,13 @@ class CapAlertsRealtimeLoader(BaseLoader):
                 bulk_data.append(op_dict)
                 bulk_data.append(doc)
             r = self.ES.bulk(index=INDEX_NAME, body=bulk_data)
+            print(r)
 
             LOGGER.debug('Result: {}'.format(r))
             return True
 
         except Exception as err:
-            LOGGER.exception('Error bulk indexing: {}'.format(err))
+            LOGGER.warning('Error bulk indexing: {}'.format(err))
             return False
 
         #print(data)
@@ -278,7 +293,8 @@ class CapAlertsRealtimeLoader(BaseLoader):
             LOGGER.warning('Cannot parse {}: {}.  Skipping'.format(filepath, err))
     
         url = 'https://dd.weather.gc.ca/{}'.format(filepath)
-    
+        url = url.replace('{}{}'.format(GEOMET_WEATHER_BASEPATH, '/amqp/'), '')
+
         root = tree.getroot()
 
         base_xml = '{urn:oasis:names:tc:emergency:cap:1.2}'
@@ -313,7 +329,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
                     for i in grandchild.iter('{}area'.format(base_xml)):
                         tag = self._get_element(i, '{}polygon'.format(base_xml))
                         name = self._get_element(i, '{}areaDesc'.format(base_xml))
-                        id_warning = re.sub('[-, .]', '', tag)[:25]
+                        id_warning = 'a-{}'.format(re.sub('[-, .]', '', tag)[:25])
     
                         if id_warning not in french_alert:
                             french_alert[id_warning] = (id_warning,
@@ -346,7 +362,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         split_tag = re.split(' |,', tag)
                         # We want to create a unique id for an area and one warning
                         # We use the warning ID + a unique code for the area
-                        id_warning = re.sub('[-, .]', '', tag)[:25]
+                        id_warning = 'a-{}'.format(re.sub('[-, .]', '', tag)[:25])
                         # We start by parsing the most recent file
                         # so we can say that if an unique ID is already in
                         # the dictionary don't add the warning from the oldest file
@@ -398,13 +414,14 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         no_dup_poly.append(k)
                 no_dup_poly.append(poly[-1])
 
-                id_ = int(english_alert[num_poly][7])
+                id_ = english_alert[num_poly][7]
 
                 AlertLocation = {
                     'type': "Feature",
                     'properties': {
                         'identifier': id_,
                         'area': english_alert[num_poly][1],
+                        'reference': identifier,
                         'zone': french_alert[num_poly][1],
                         'headline': english_alert[num_poly][2],
                         'titre': french_alert[num_poly][2],
@@ -454,7 +471,7 @@ def clean_records(ctx, days):
     query = {
         'query': {
             'range': {
-                'properties.datetime': {
+                'properties.expires': {
                     'lte': older_than
                 }
             }
