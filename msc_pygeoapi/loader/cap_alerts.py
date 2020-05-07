@@ -41,7 +41,7 @@ from msc_pygeoapi.env import (MSC_PYGEOAPI_ES_TIMEOUT, MSC_PYGEOAPI_ES_URL,
                               MSC_PYGEOAPI_ES_AUTH, MSC_PYGEOAPI_BASEPATH,
                               GEOMET_WEATHER_BASEPATH)
 from msc_pygeoapi.loader.base import BaseLoader
-from msc_pygeoapi.util import click_abort_if_false, get_es
+from msc_pygeoapi.util import click_abort_if_false, get_es, json_pretty_print
 
 LOGGER = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
 
         self.ES = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
-        if not self.ES.indices.exists(INDEX_NAME):
+        if not self.ES.indices.exists(INDEX_NAME, request_timeout=MSC_PYGEOAPI_ES_TIMEOUT):
             self.ES.indices.create(index=INDEX_NAME, body=SETTINGS,
                                    request_timeout=MSC_PYGEOAPI_ES_TIMEOUT)
 
@@ -203,7 +203,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
         data = self.weather_warning2geojson(filepath)
 
         try:
-            bulk_data = []
+            self.bulk_data = []
             for doc in data:
                 op_dict = {
                     'index': {
@@ -212,9 +212,9 @@ class CapAlertsRealtimeLoader(BaseLoader):
                     }
                 }
                 op_dict['index']['_id'] = doc['properties']['identifier']
-                bulk_data.append(op_dict)
-                bulk_data.append(doc)
-            r = self.ES.bulk(index=INDEX_NAME, body=bulk_data)
+                self.bulk_data.append(op_dict)
+                self.bulk_data.append(doc)
+            r = self.ES.bulk(index=INDEX_NAME, body=self.bulk_data)
 
             LOGGER.debug('Result: {}'.format(r))
             return True
@@ -470,6 +470,43 @@ def cap_alerts():
 
 @click.command()
 @click.pass_context
+@click.option('--file', '-f', 'file_',
+              type=click.Path(exists=True, resolve_path=True),
+              help='Path to file')
+@click.option('--directory', '-d', 'directory',
+              type=click.Path(exists=True, resolve_path=True,
+                              dir_okay=True, file_okay=False),
+              help='Path to directory')
+def add(ctx, file_, directory):
+    """add data to system"""
+
+    if all([file_ is None, directory is None]):
+        raise click.ClickException('Missing --file/-f or --dir/-d option')
+
+    files_to_process = []
+
+    if file_ is not None:
+        files_to_process = [file_]
+    elif directory is not None:
+        for root, dirs, files in os.walk(directory):
+            for f in [file for file in files if file.endswith('.xml')]:
+                files_to_process.append(os.path.join(root, f))
+        files_to_process.sort(key=os.path.getmtime)
+
+    for file_to_process in files_to_process:
+        plugin_def = {
+            'filename_pattern': 'alerts/cap',
+            'handler': 'msc_pygeoapi.loader.cap_alerts.CapAlertsRealtimeLoader'  # noqa
+        }
+        loader = CapAlertsRealtimeLoader(plugin_def)
+        result = loader.load_data(file_to_process)
+        if result:
+            click.echo('GeoJSON features generated: {}'.format(
+                json_pretty_print(loader.bulk_data)))
+
+
+@click.command()
+@click.pass_context
 @click.option('--days', '-d', default=DAYS_TO_KEEP, type=int,
               help='delete documents older than n days (default={})'.format(
                   DAYS_TO_KEEP))
@@ -513,5 +550,6 @@ def delete_index(ctx):
         es.indices.delete(INDEX_NAME)
 
 
+cap_alerts.add_command(add)
 cap_alerts.add_command(clean_records)
 cap_alerts.add_command(delete_index)
