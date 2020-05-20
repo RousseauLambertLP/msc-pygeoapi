@@ -6,19 +6,6 @@ MSC GeoMet pygeoapi server configuration and utilities
 
 ## Installation
 
-The easiest way to install msc-pygeoapi is via the Python [pip](https://pip.pypa.io/en/stable/)
-utility:
-
-```bash
-pip install msc-pygeoapi
-```
-
-Installing via apt:
-
-```bash
-apt-get install msc-pygeoapi
-```
-
 ### Requirements
 - Python 3.  Works with Python 2.7
 - [virtualenv](https://virtualenv.pypa.io/)
@@ -35,7 +22,7 @@ Dependencies of note:
 ### Installing msc-pygeoapi
 ```bash
 # setup virtualenv
-virtualenv --system-site-packages -p python3 msc-pygeoapi
+python3 -m venv --system-site-packages msc-pygeoapi
 cd msc-pygeoapi
 source bin/activate
 
