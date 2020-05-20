@@ -217,23 +217,23 @@ class CapAlertsRealtimeLoader(BaseLoader):
             r = self.ES.bulk(index=INDEX_NAME, body=self.bulk_data)
 
             LOGGER.debug('Result: {}'.format(r))
+
+            previous_alerts = self.delete_references_alerts()
+            if previous_alerts:
+                LOGGER.debug('Deleted old warning')
+            else:
+                LOGGER.debug('New warning, no deletion')
             return True
 
         except Exception as err:
             LOGGER.warning('Error bulk indexing: {}'.format(err))
             return False
 
-        #print(data)
+    def delete_references_alerts(self):
+        """
+        """
 
-        #try:
-        #    r = self.ES.index(index=INDEX_NAME,
-        #                      id=data['properties']['identifier'],
-        #                      body=data)
-        #    LOGGER.debug('Result: {}'.format(r))
-        #    return True
-        #except Exception as err:
-        #    LOGGER.warning('Error indexing: {}'.format(err))
-        #    return False
+        print(self.references_arr)
 
     def _get_date_format(self, date):
         """
@@ -309,9 +309,9 @@ class CapAlertsRealtimeLoader(BaseLoader):
                                   '{}identifier'.format(base_xml))
         references = self._get_element(root,
                                   '{}references'.format(base_xml)).split(' ')
-        references_arr = []
+        self.references_arr = []
         for ref in references:
-            references_arr.append(ref.split(',')[1])
+            self.references_arr.append(ref.split(',')[1])
 
         for grandchild in root.iter('{}info'.format(base_xml)):
             expires = self._get_date_format(self._get_element(grandchild,
@@ -448,7 +448,7 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         'expires': english_alert[num_poly][4],
                         'alert_type': english_alert[num_poly][5],
                         'status': english_alert[num_poly][6],
-                        'references': references_arr,
+                        'references': self.references_arr,
                         'url': english_alert[num_poly][9]
                     },
                    'geometry': {
