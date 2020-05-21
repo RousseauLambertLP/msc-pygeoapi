@@ -30,16 +30,13 @@
 
 import click
 from datetime import datetime, timedelta
-import json
 import logging
 from lxml import etree
 import os
 import re
-import sys
 
 from msc_pygeoapi.env import (MSC_PYGEOAPI_ES_TIMEOUT, MSC_PYGEOAPI_ES_URL,
-                              MSC_PYGEOAPI_ES_AUTH, MSC_PYGEOAPI_BASEPATH,
-                              GEOMET_WEATHER_BASEPATH)
+                              MSC_PYGEOAPI_ES_AUTH, GEOMET_WEATHER_BASEPATH)
 from msc_pygeoapi.loader.base import BaseLoader
 from msc_pygeoapi.util import click_abort_if_false, get_es, json_pretty_print
 
@@ -83,12 +80,8 @@ SETTINGS = {
                         }
                     },
                     'reference': {
-                        'type': 'text',
-                        'fields': {
-                            'raw': {
-                                'type': 'keyword'
-                            }
-                       }
+                        'type': 'keyword',
+                        'index': 'true'
                     },
                     'zone': {
                         'type': 'text',
@@ -161,7 +154,7 @@ SETTINGS = {
                                 'type': 'keyword'
                             }
                         }
-                    }, 
+                    },
                     'url': {
                         'type': 'text',
                         'fields': {
@@ -187,7 +180,8 @@ class CapAlertsRealtimeLoader(BaseLoader):
 
         self.ES = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
-        if not self.ES.indices.exists(INDEX_NAME, request_timeout=MSC_PYGEOAPI_ES_TIMEOUT):
+        if not self.ES.indices.exists(INDEX_NAME,
+                                      request_timeout=MSC_PYGEOAPI_ES_TIMEOUT):
             self.ES.indices.create(index=INDEX_NAME, body=SETTINGS,
                                    request_timeout=MSC_PYGEOAPI_ES_TIMEOUT)
 
@@ -219,6 +213,9 @@ class CapAlertsRealtimeLoader(BaseLoader):
             LOGGER.debug('Result: {}'.format(r))
 
             previous_alerts = self.delete_references_alerts()
+
+            click.echo('done importing in ES')
+
             if previous_alerts:
                 LOGGER.debug('Deleted old warning')
             else:
@@ -230,10 +227,28 @@ class CapAlertsRealtimeLoader(BaseLoader):
             return False
 
     def delete_references_alerts(self):
-        """
-        """
+        """Delete old alerts documents"""
 
-        print(self.references_arr)
+        if self.references_arr and len(self.references_arr) != 0:
+
+            es = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
+
+            click.echo('Deleting old alerts')
+
+            query = {
+                'query': {
+                    'terms': {
+                        'properties.reference': self.references_arr
+                    }
+                }
+            }
+
+            es.delete_by_query(index=INDEX_NAME, body=query)
+
+            return True
+
+        else:
+            return False
 
     def _get_date_format(self, date):
         """
@@ -286,63 +301,71 @@ class CapAlertsRealtimeLoader(BaseLoader):
         english_alert_remove = []
 
         timeformat = '%Y-%m-%dT%H:%M:%SZ'
+
         # we want to run a loop on every cap-xml in filepath and add them
         # in the geojson
         # we want to strat by the newest file in the directory
         LOGGER.info('Processing {} CAP documents'.format(len(filepath)))
-    
+
         LOGGER.debug('Processing {}'.format(filepath))
         # with the lxml library we parse the xml file
         try:
             tree = etree.parse(filepath)
         except Exception as err:
-            LOGGER.warning('Cannot parse {}: {}.  Skipping'.format(filepath, err))
-    
+            LOGGER.warning('Cannot parse {}: {}'.format(filepath, err))
+
         url = 'https://dd.weather.gc.ca/{}'.format(filepath)
         url = url.replace('{}{}'.format(GEOMET_WEATHER_BASEPATH, '/amqp/'), '')
 
         root = tree.getroot()
 
-        base_xml = '{urn:oasis:names:tc:emergency:cap:1.2}'
+        b_xml = '{urn:oasis:names:tc:emergency:cap:1.2}'
 
         identifier = self._get_element(root,
-                                  '{}identifier'.format(base_xml))
+                                       '{}identifier'.format(b_xml))
         references = self._get_element(root,
-                                  '{}references'.format(base_xml)).split(' ')
+                                       '{}references'.format(b_xml)).split(' ')
         self.references_arr = []
         for ref in references:
             self.references_arr.append(ref.split(',')[1])
 
-        for grandchild in root.iter('{}info'.format(base_xml)):
+        for grandchild in root.iter('{}info'.format(b_xml)):
             expires = self._get_date_format(self._get_element(grandchild,
-                                                    '{}expires'.format(base_xml)))\
+                                            '{}expires'.format(b_xml)))\
                       .strftime(timeformat)
-    
+
             status_alert = self._get_element(grandchild,
-                                        '{}parameter[last()-4]/'
-                                        '{}value'.format(base_xml, base_xml))
-    
+                                             '{}parameter[last()-4]/'
+                                             '{}value'.format(b_xml,
+                                                              b_xml))
+
             if self._get_date_format(expires) > now:
                 language = self._get_element(grandchild,
-                                        '{}language'.format(base_xml))
+                                             '{}language'.format(b_xml))
                 if language == 'fr-CA':
                     headline = self._get_element(grandchild,
-                                            '{}headline'.format(base_xml))
-                    descript = self._get_element(grandchild,
-                                            '{}description'.format(base_xml))\
-                        .replace("\n", " ").strip()
-    
-                    for i in grandchild.iter('{}area'.format(base_xml)):
-                        tag = self._get_element(i, '{}polygon'.format(base_xml))
-                        name = self._get_element(i, '{}areaDesc'.format(base_xml))
+                                                 '{}headline'.format(b_xml))
 
-                        for j in grandchild.iter('{}geocode'.format(base_xml)):
-                            valueName = self._get_element(j, '{}valueName'.format(base_xml))
+                    description_fr = '{}description'.format(b_xml)
+                    descript = self._get_element(grandchild, description_fr)
+                    descript = descript.replace("\n", " ").strip()
+
+                    for i in grandchild.iter('{}area'.format(b_xml)):
+                        tag = self._get_element(i,
+                                                '{}polygon'.format(b_xml))
+                        name = self._get_element(i,
+                                                 '{}areaDesc'.format(b_xml))
+
+                        for j in grandchild.iter('{}geocode'.format(b_xml)):
+                            str_value_name = '{}valueName'.format(b_xml)
+                            valueName = self._get_element(j, str_value_name)
+
                             if valueName == 'layer:EC-MSC-SMC:1.0:CLC':
-                                geocode = self._get_element(j, '{}value'.format(base_xml))
+                                geocode_value = '{}value'.format(b_xml)
+                                geocode = self._get_element(j, geocode_value)
 
                         id_warning = '{}_{}'.format(identifier, geocode)
-    
+
                         if id_warning not in french_alert:
                             french_alert[id_warning] = (id_warning,
                                                         name,
@@ -350,42 +373,40 @@ class CapAlertsRealtimeLoader(BaseLoader):
                                                         descript)
                 else:
                     headline = self._get_element(grandchild,
-                                            '{}headline'.format(base_xml))
-                    descript = self._get_element(grandchild,
-                                            '{}description'.format(base_xml))\
-                        .replace("\n", " ").strip()
-    
-                    effective = self._get_date_format(self._get_element
-                                                 (grandchild,
-                                                  '{}effective'.format(base_xml)))\
-                        .strftime(timeformat)
-    
+                                                 '{}headline'.format(b_xml))
+
+                    description = '{}description'.format(b_xml)
+                    descript = self._get_element(grandchild, description)
+                    descript = descript.replace("\n", " ").strip()
+
+                    effective_date =\
+                        self._get_element(grandchild,
+                                          '{}effective'.format(b_xml))
+                    effective = self._get_date_format(effective_date)
+                    effective = effective.strftime(timeformat)
+
                     warning = self._get_element(grandchild,
-                                           '{}parameter[1]/'
-                                           '{}value'.format(base_xml,
-                                                            base_xml))
-    
+                                                '{}parameter[1]/'
+                                                '{}value'.format(b_xml,
+                                                                 b_xml))
+
                     # There can be many <area> cobvered by one
                     #  <info> so we have to loop through the info
-                    for i in grandchild.iter('{}area'.format(base_xml)):
-                        tag = self._get_element(i, '{}polygon'.format(base_xml))
-                        name = self._get_element(i, '{}areaDesc'.format(base_xml))
-    
-                        for j in grandchild.iter('{}geocode'.format(base_xml)):
-                            valueName = self._get_element(j, '{}valueName'.format(base_xml))
+                    for i in grandchild.iter('{}area'.format(b_xml)):
+                        tag = self._get_element(i, '{}polygon'.format(b_xml))
+                        name = self._get_element(i, '{}areaDesc'.format(b_xml))
+
+                        for j in grandchild.iter('{}geocode'.format(b_xml)):
+                            valueName = self.\
+                                _get_element(j, '{}valueName'.format(b_xml))
                             if valueName == 'layer:EC-MSC-SMC:1.0:CLC':
-                                geocode = self._get_element(j, '{}value'.format(base_xml))
+                                geocode = self.\
+                                    _get_element(j, '{}value'.format(b_xml))
 
                         split_tag = re.split(' |,', tag)
 
                         id_warning = '{}_{}'.format(identifier, geocode)
 
-                        # We start by parsing the most recent file
-                        # so we can say that if an unique ID is already in
-                        # the dictionary don't add the warning from the oldest file
-                        # The newest file is to announce the end of a warning or
-                        # to update the warning
-                        # So we never want to have twice the same id in the dict
                         if id_warning not in english_alert:
                             english_alert[id_warning] = (split_tag,
                                                          name,
@@ -407,12 +428,12 @@ class CapAlertsRealtimeLoader(BaseLoader):
         for key in english_alert_remove:
             del english_alert[key]
             del french_alert[key]
-    
+
         # To keep going we want to have the same number of warning
         # in english and in french
         if len(french_alert) == len(english_alert):
             LOGGER.info('Creating %d features', len(english_alert))
-    
+
             data = []
             for num_poly in english_alert:
                 poly = []
@@ -421,8 +442,9 @@ class CapAlertsRealtimeLoader(BaseLoader):
                                              2))):
                     if len(english_alert[num_poly][0]) > 1:
                         poly.append([float(english_alert[num_poly][0][l + 1]),
-                                     float(english_alert[num_poly][0][l]), 0.0])
-    
+                                     float(english_alert[num_poly][0][l]),
+                                     0.0])
+
                 # for temporary care of the duplicate neighbors coordinate
                 # poly = [k for k, g in groupby(poly)]
                 no_dup_poly = []
@@ -451,14 +473,14 @@ class CapAlertsRealtimeLoader(BaseLoader):
                         'references': self.references_arr,
                         'url': english_alert[num_poly][9]
                     },
-                   'geometry': {
-                       'type': "Polygon",
-                       'coordinates': [no_dup_poly]
+                    'geometry': {
+                        'type': "Polygon",
+                        'coordinates': [no_dup_poly]
                     }
                 }
 
                 data.append(AlertLocation)
-    
+
         return data
 
 
